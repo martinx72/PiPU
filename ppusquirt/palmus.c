@@ -12,27 +12,28 @@ struct palmusdata {
 };
 struct palmusdata *pmdata;
 
-int fd;
+int fd_palmusdata;
 
 int main(int argc, char **argv) {
 
     /* Create shared memory object and set its size */
     int i, j, a ;
 
-    fd = shm_open("/palmusdata", O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
-    if (fd == -1)
-        /* Handle error */;
+    fd_palmusdata = shm_open("/palmusdata", O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
+    if (fd_palmusdata == -1)
+    {
+		/* Handle error */
+	}
 
 
-    if (ftruncate(fd, sizeof(struct palmusdata)) == -1)
-        /* Handle error */;
-
+    if (ftruncate(fd_palmusdata, sizeof(struct palmusdata)) == -1)
+	{
+		/* Handle error */;
+	}
 
     /* Map shared memory object */
-
-
-    pmdata = mmap(NULL, sizeof(struct palmusdata), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (pmdata == MAP_FAILED)
+    pmdata = mmap(NULL, sizeof(struct palmusdata), PROT_READ | PROT_WRITE, MAP_SHARED, fd_palmusdata, 0);
+    if ( pmdata == MAP_FAILED )
         exit(1);
 
     a = 1;
@@ -44,10 +45,11 @@ int main(int argc, char **argv) {
         }
     }
 
-
     /* Now we can refer to mapped region using fields of rptr;
     for example, rptr->len */
 
     printf("%d\n", pmdata->music);
+	
+	close(fd_palmusdata);
 
 }

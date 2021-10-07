@@ -200,10 +200,8 @@ int FindBestColorMatchFromPalette(Color theColor, unsigned char *Palette, int bg
 
 typedef struct Palmatch
 {
-
 	unsigned char palNo;
 	int frequency;
-
 } Palmatch;
 
 int ComparePalMatch(const void *s1, const void *s2)
@@ -350,16 +348,24 @@ void GFXSetup()
 
 	// Open palette/music shared memory area
 	int fd;
-	fd = shm_open("/palmusdata", O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
-	if (fd == -1)
+	if ( (fd = shm_open("/palmusdata", O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRWXU)) == -1)
+	{
+		perror("shm_open '/palmusdata' failed");
 		exit(1);
+	}
 
 	if (ftruncate(fd, sizeof(struct palmusdata)) == -1)
+	{
+		perror("ftruncate '/palmusdata' failed");
 		exit(1);
+	}
 
 	pmdata = mmap(NULL, sizeof(struct palmusdata), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	if (pmdata == MAP_FAILED)
+	{
+		perror("mmap '/palmusdata' failed");
 		exit(1);
+	}
 
 
 	// Default DOOM Palette
@@ -488,14 +494,12 @@ void GFXSetup()
 
 	Color col;
 
-
-
 	// build palette lookup tables to trade memory for speed
 	// Try to open them from last time if possible
-	if (fp = fopen("lookup.bin", "r"))
+	if ( (fp = fopen("lookup.bin", "r")) != NULL )
 	{
-		if ((n = fread(&PaletteLookup, 1, 256 * 256 * 256, fp)) != (256 * 256 * 256)){ printf("exit : %lu\n", n); exit(1); }
-		if ((n = fread(&ColorLookup, 1, 256 * 256 * 256 * 4, fp)) != (256 * 256 * 256 * 4)){ printf("exit2 : %lu\n", n); exit(1); }
+		if ((n = fread(&PaletteLookup, 1, 256 * 256 * 256, fp)) != (256 * 256 * 256)){ printf("exit : %u\n", n); exit(1); }
+		if ((n = fread(&ColorLookup, 1, 256 * 256 * 256 * 4, fp)) != (256 * 256 * 256 * 4)){ printf("exit2 : %u\n", n); exit(1); }
 		fclose(fp);
 	}
 	// If not, generate from scratch (takes 30sec or so)
@@ -608,8 +612,10 @@ void FitFrame(char *bmp, PPUFrame *theFrame, int startline, int endline)
 
 			// Start building the 8x1 tile
 			PPUTile currTile;
-			currTile.NT = 0x00;																// Nametable is irrelevant
-			currTile.AT = (palToUse) | (palToUse << 2) | (palToUse << 4) | (palToUse << 6); // Attribute table can just have 4 copies of the palette number to save calculating which quadrant we're in
+			currTile.NT = 0x00;		// Nametable is irrelevant
+
+			// Attribute table can just have 4 copies of the palette number to save calculating which quadrant we're in
+			currTile.AT = (palToUse) | (palToUse << 2) | (palToUse << 4) | (palToUse << 6); 
 			currTile.LowBG = 0;
 			currTile.HighBG = 0;
 

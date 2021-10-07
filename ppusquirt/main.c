@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/time.h>
 #include <pthread.h>
+#include <linux/uinput.h>
 #include <libusb-1.0/libusb.h>
 #include "nesstuff.h"
 
@@ -27,6 +28,7 @@ void GFXSetup();
 pthread_mutex_t outmutex, bufferswitchmutex;
 pthread_cond_t outfullcond;
 volatile int outbuffull = 0;
+unsigned char bDisplayFPS = 0;
 
 // The out buffer that is currently being displayed, for double buffering
 int readBuf = 0;
@@ -94,21 +96,23 @@ void *gfxthread(void *threadid)
 		pthread_mutex_unlock(&rptr->fulllock);
 
 		// Display FPS
-		if (td->threadno == 0)
+		if ( bDisplayFPS )
 		{
-			frameCount++;
-			gettimeofday(&tv, NULL);
-			if (tv.tv_sec != lastTime)
+			if (td->threadno == 0)
 			{
-				lastTime = tv.tv_sec;
-
-				printf("FPS : %d   Ctrl : %d\n", frameCount, indata[0]);
-				frameCount = 0;
+				frameCount++;
+				gettimeofday(&tv, NULL);
+				if (tv.tv_sec != lastTime)
+				{
+					lastTime = tv.tv_sec;
+					printf("FPS : %d   Ctrl : %d\n", frameCount, indata[0]);
+					frameCount = 0;
+				}
 			}
 		}
 
 		// Convert frame section to NES format
-		FitFrame(&rptr->buf, &outbuf[writeBuf], startline, endline);
+		FitFrame((char*)&rptr->buf, (PPUFrame *)&outbuf[writeBuf], startline, endline);
 
 		// if this is thread zero, wait for other threads to finish then switch the double buffer
 		if (td->threadno == 0)
@@ -172,37 +176,81 @@ void *gfxthread(void *threadid)
 			pthread_mutex_unlock(&outmutex);
 		}
 	}
+
+	return 0;
 }
 
-int main()
+unsigned char uc8Keys[8] = {
+  KEY_UP,          // D-PAD UP
+  KEY_DOWN,        // D-PAD Down 
+  KEY_LEFT,        // D-PAD Left
+  KEY_RIGHT,       // D-PAD Right     
+  KEY_ESC,         // Start
+  KEY_SPACE,       // Select 
+  KEY_LEFTCTRL,    // Btn A
+  KEY_LEFTALT      // Btn B
+  };
+
+int main(int argc, char **argv)
 {
 
-	int fd;
-
-	FILE *fp;
-
+	int fd_sdlrawout;
 	pthread_condattr_t cattr;
 	pthread_mutexattr_t mattr;
-
 	int rc;
-
 	pthread_t squirthandle;
 
 	// Generate color lookup tables, etc
 	GFXSetup();
 
-	fd = shm_open("/sdlrawout", O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
-	if (fd == -1)
+	if ( (fd_sdlrawout = shm_open("/sdlrawout", O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRWXU)) == -1 )
+	{
+		perror("shm_open '/sdlrawout' failed");
 		exit(1);
+	}
 
-	if (ftruncate(fd, sizeof(struct region)) == -1)
+	if ( ftruncate(fd_sdlrawout, sizeof(struct region)) == -1 )
+	{
+		perror("ftruncate '/sdlrawout' failed");
+		close(fd_sdlrawout);
 		exit(1);
+	}
 
 	/* Map shared memory object */
-	rptr = mmap(NULL, sizeof(struct region),
-				PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	rptr = mmap(NULL, sizeof(struct region), PROT_READ | PROT_WRITE, MAP_SHARED, fd_sdlrawout, 0);
 	if (rptr == MAP_FAILED)
+	{
+		perror("mmap '/sdlrawout' failed");
+		close(fd_sdlrawout);
 		exit(1);
+	}
+
+	// enable FPS counting via env setting
+  const char *envr = getenv("PPUSQUIRT_SHOW_FPS");
+	if ((envr) && (strcmp(envr, "1") == 0))
+		bDisplayFPS = 1;
+
+  // reading the preset keyboard file if available
+  FILE *fpKeyMappingSetting = fopen(argv[1], "rb");
+	if ( fpKeyMappingSetting != NULL )
+	{
+  	fseek(fpKeyMappingSetting, 0L, SEEK_END);
+		int nFileSize = ftell(fpKeyMappingSetting);
+		fseek(fpKeyMappingSetting, 0L, SEEK_SET);
+		if ( nFileSize == 8 )
+		{
+			printf("Original Key Mapping: ");
+			for ( int i = 0; i < 8; i++ )
+				printf("0x%02X ", uc8Keys[i]);
+			printf("\n");
+			fread(uc8Keys, 1, 8, fpKeyMappingSetting);
+			printf("Updated Key Mapping:  ");
+			for ( int i = 0; i < 8; i++ )
+				printf("0x%02X ", uc8Keys[i]);
+			printf("\n\n");
+		}
+		fclose(fpKeyMappingSetting);
+	}
 
 	pthread_condattr_init(&cattr);
 	pthread_condattr_setpshared(&cattr, PTHREAD_PROCESS_SHARED);
@@ -217,9 +265,10 @@ int main()
 	pthread_mutex_init(&bufferswitchmutex, NULL);
 	pthread_cond_init(&outfullcond, NULL);
 
-	fp = fopen("testframe.bgra", "r");
+	FILE *fp_testframe = fopen("waiting_screen.bgra", "rb");
+	fread(&rptr->buf, 307200, 1, fp_testframe);
+	fclose(fp_testframe);
 
-	fread(&rptr->buf, 307200, 1, fp);
 	rptr->full = 1;
 	
 	memset(&outbuf[0], 0x00, sizeof(PPUFrame));
@@ -235,7 +284,7 @@ int main()
 
 		if (rc)
 		{
-			printf("ERROR; return code from pthread_create() is %d\n", rc);
+			printf("ERROR: return code from pthread_create() is %d\n", rc);
 			exit(-1);
 		}
 	}
@@ -243,12 +292,13 @@ int main()
 	rc = pthread_create(&squirthandle, NULL, Squirt, NULL);
 	if (rc)
 	{
-		printf("ERROR; return code from pthread_create() is %d\n", rc);
+		printf("ERROR: return code from pthread_create() is %d\n", rc);
 		exit(-1);
 	}
 
-
-	while (1){
-		sleep(10);
-	}
+	pthread_join(squirthandle, NULL);
+	for (int i = 0; i < NUM_GFX_THREADS; i++)
+		pthread_join(threads[i].handle, NULL);
+		
+	return 1;
 }

@@ -32,7 +32,7 @@ void trans_right(int num)
 
     // TODO - need to guarantee that any frame with a palette change doesn't actually send its palette change until the next frame is ready
 
-    libusb_fill_bulk_transfer(transfer_out[num], devh, 0x02, &outbuf[readBuf], 41002, cb_out, (void *)&transferIds[num], 0);
+    libusb_fill_bulk_transfer(transfer_out[num], devh, 0x02, (unsigned char*)&outbuf[readBuf], 41002, cb_out, (void *)&transferIds[num], 0);
 
     if (libusb_submit_transfer(transfer_out[num]) < 0)
     {
@@ -48,56 +48,68 @@ void cb_out(struct libusb_transfer *transfer)
 
 
 // Fake a keypress via uinput
-void emit(int fd, int type, int code, int val)
+void __inline emit(int fd, int type, int code, int val)
 {
-    struct input_event ie;
+    struct input_event ie = {0};
 
     ie.type = type;
     ie.code = code;
     ie.value = val;
+
     /* timestamp values below are ignored */
-    ie.time.tv_sec = 0;
-    ie.time.tv_usec = 0;
+    //ie.time.tv_sec = 0;
+    //ie.time.tv_usec = 0;
 
     write(fd, &ie, sizeof(ie));
 }
 
-int fd;
+int fd_uinput;
 unsigned char indata[3];
 
 // Thread that squirts data to the PPU (and recieves data back)
+ static unsigned char 
+ GAMEPAD_KEYS[] = {
+    PAD_UP,
+    PAD_DOWN,
+    PAD_LEFT,
+    PAD_RIGHT,
+    PAD_START,
+    PAD_SELECT,
+    PAD_A,
+    PAD_B
+    };
+
+extern unsigned char uc8Keys[8];    
+
 void *Squirt(void *threadid)
 {
 
     int r = 1; // result
-    
     int actual_length;
 
-
     // Set up keyboard emulation
-
     struct uinput_setup usetup;
-    fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
-    ioctl(fd, UI_SET_EVBIT, EV_KEY);
-    ioctl(fd, UI_SET_KEYBIT, KEY_ESC);
-    ioctl(fd, UI_SET_KEYBIT, KEY_UP);
-    ioctl(fd, UI_SET_KEYBIT, KEY_DOWN);
-    ioctl(fd, UI_SET_KEYBIT, KEY_LEFT);
-    ioctl(fd, UI_SET_KEYBIT, KEY_RIGHT);
-    ioctl(fd, UI_SET_KEYBIT, KEY_SPACE);
-    ioctl(fd, UI_SET_KEYBIT, KEY_LEFTCTRL);
-    ioctl(fd, UI_SET_KEYBIT, KEY_LEFTALT);
-    memset(&usetup, 0, sizeof(usetup));
-    usetup.id.bustype = BUS_USB;
-    usetup.id.vendor = 0x1234; 
-    usetup.id.product = 0x5678;
-    strcpy(usetup.name, "Example device");
-    ioctl(fd, UI_DEV_SETUP, &usetup);
-    ioctl(fd, UI_DEV_CREATE);
+    fd_uinput = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
+    if ( fd_uinput < 0 )
+    {
+        fprintf(stderr, "/dev/uinput open failed!\n");
+    }
+    else
+    {
+        ioctl(fd_uinput, UI_SET_EVBIT, EV_KEY);
+        for ( int i = 0; i < 8; i++)
+            ioctl(fd_uinput, UI_SET_KEYBIT, uc8Keys[i]);
 
+        memset(&usetup, 0, sizeof(usetup));
+        usetup.id.bustype = BUS_USB;
+        usetup.id.vendor = 0x1234; 
+        usetup.id.product = 0x5678;
+        strcpy(usetup.name, "PiPU Virtual Keyboard");
+        ioctl(fd_uinput, UI_DEV_SETUP, &usetup);
+        ioctl(fd_uinput, UI_DEV_CREATE);
+    }
 
     // Init libUSB
-
     r = libusb_init(NULL);
     if (r < 0)
     {
@@ -136,48 +148,32 @@ void *Squirt(void *threadid)
     trans_right(0);
     trans_right(1);
 
-
     // Handle reading from PPU bus, for gamepad input
+    unsigned char PrevKey = 0x00;
+    unsigned char CurrentKey = 0x00;
+    unsigned char ucChkKey;
 
     while (1)
     {
         r = libusb_bulk_transfer(devh, 0x86, indata, sizeof(indata), &actual_length, 0);
         if (r == 0 && actual_length == sizeof(indata))
         {
-            if (indata[0] & PAD_A)
-                emit(fd, EV_KEY, KEY_LEFTCTRL, 1);
-            else
-                emit(fd, EV_KEY, KEY_LEFTCTRL, 0);
-            if (indata[0] & PAD_B)
-                emit(fd, EV_KEY, KEY_LEFTALT, 1);
-            else
-                emit(fd, EV_KEY, KEY_LEFTALT, 0);
-            if (indata[0] & PAD_START)
-                emit(fd, EV_KEY, KEY_ESC, 1);
-            else
-                emit(fd, EV_KEY, KEY_ESC, 0);
-            if (indata[0] & PAD_SELECT)
-                emit(fd, EV_KEY, KEY_SPACE, 1);
-            else
-                emit(fd, EV_KEY, KEY_SPACE, 0);
-            if (indata[0] & PAD_UP)
-                emit(fd, EV_KEY, KEY_UP, 1);
-            else
-                emit(fd, EV_KEY, KEY_UP, 0);
-            if (indata[0] & PAD_DOWN)
-                emit(fd, EV_KEY, KEY_DOWN, 1);
-            else
-                emit(fd, EV_KEY, KEY_DOWN, 0);
-            if (indata[0] & PAD_LEFT)
-                emit(fd, EV_KEY, KEY_LEFT, 1);
-            else
-                emit(fd, EV_KEY, KEY_LEFT, 0);
-            if (indata[0] & PAD_RIGHT)
-                emit(fd, EV_KEY, KEY_RIGHT, 1);
-            else
-                emit(fd, EV_KEY, KEY_RIGHT, 0);
+            CurrentKey = indata[0];
+            if  ( PrevKey != CurrentKey ) 
+            {
+                if ( fd_uinput != -1 )
+                {
+                    for ( int i = 0; i < 8; i++ )
+                    {
+                        ucChkKey = CurrentKey & GAMEPAD_KEYS[i];
+                        if ( (PrevKey & GAMEPAD_KEYS[i]) != ucChkKey ) 
+                            emit(fd_uinput, EV_KEY, uc8Keys[i], ucChkKey ? 1:0);
+                    }
 
-            emit(fd, EV_SYN, SYN_REPORT, 0);
+                    emit(fd_uinput, EV_SYN, SYN_REPORT, 0);
+                }
+                PrevKey = CurrentKey;
+            }
         }
         else
         {
@@ -187,4 +183,6 @@ void *Squirt(void *threadid)
         if (libusb_handle_events(NULL) != LIBUSB_SUCCESS)
             break;
     }
+    return 0;
 }
+
