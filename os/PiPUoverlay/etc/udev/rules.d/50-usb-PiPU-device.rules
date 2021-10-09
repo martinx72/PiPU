@@ -1,5 +1,5 @@
 # for accessing the FX2LP without root privilege
-SUBSYSTEM=="usb", ATTRS{idVendor}=="04b4", ATTRS{idProduct}=="00f1", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04b4", ATTRS{idProduct}=="00f1", GROUP="plugdev", TAG+="uaccess", MODE="0666"
 
 # allow programs without root permissions to use uinput
 KERNEL=="uinput", MODE="0666"
