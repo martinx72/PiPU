@@ -80,7 +80,7 @@ int SDL_DUMMY_CreateWindowFramebuffer(_THIS, SDL_Window * window, Uint32 * forma
     *pitch = surface->pitch;
 
 
-    fd = shm_open("/sdlrawout", O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
+    fd = shm_open("/sdlrawout", O_CREAT | O_RDWR, S_IRWXU | S_IRWXG | S_IRWXO);
     if (fd == -1)
         /* Handle error */;
 

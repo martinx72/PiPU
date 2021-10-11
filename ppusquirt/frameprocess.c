@@ -348,7 +348,7 @@ void GFXSetup()
 
 	// Open palette/music shared memory area
 	int fd;
-	if ( (fd = shm_open("/palmusdata", O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRWXU)) == -1)
+	if ( (fd = shm_open("/palmusdata", O_CREAT | O_RDWR, S_IRWXU | S_IRWXG | S_IRWXO)) == -1)
 	{
 		perror("shm_open '/palmusdata' failed");
 		exit(1);

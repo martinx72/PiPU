@@ -19,7 +19,7 @@ int main(int argc, char **argv) {
     /* Create shared memory object and set its size */
     int i, j, a ;
 
-    fd_palmusdata = shm_open("/palmusdata", O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
+    fd_palmusdata = shm_open("/palmusdata", O_CREAT | O_RDWR, S_IRWXU | S_IRWXG | S_IRWXO );
     if (fd_palmusdata == -1)
     {
 		/* Handle error */

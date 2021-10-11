@@ -203,7 +203,7 @@ int main(int argc, char **argv)
 	// Generate color lookup tables, etc
 	GFXSetup();
 
-	if ( (fd_sdlrawout = shm_open("/sdlrawout", O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRWXU)) == -1 )
+	if ( (fd_sdlrawout = shm_open("/sdlrawout", O_CREAT | O_RDWR, S_IRWXU | S_IRWXG | S_IRWXO)) == -1 )
 	{
 		perror("shm_open '/sdlrawout' failed");
 		exit(1);
